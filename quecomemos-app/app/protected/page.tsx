@@ -12,6 +12,23 @@ export default async function ProtectedPage() {
     redirect("/auth/login");
   }
 
+  const jwt = await supabase.auth.getSession().then(res => res.data.session?.access_token);
+
+  let profile = null;
+
+  if (data.claims && jwt) {
+    const res = await fetch(`http://localhost:3005/profile/${data.claims.sub}`, {
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+      },
+      cache: "no-store",
+    });
+    if (res.ok) {
+      profile = await res.json();
+    }
+  }
+  console.log({ profile });
+  
   return (
     <div className="flex-1 w-full flex flex-col gap-12">
       <div className="w-full">
@@ -26,6 +43,12 @@ export default async function ProtectedPage() {
         <pre className="text-xs font-mono p-3 rounded border max-h-32 overflow-auto">
           {JSON.stringify(data.claims, null, 2)}
         </pre>
+
+        {profile && (
+          <pre className="text-xs font-mono p-3 rounded border max-h-32 overflow-auto">
+            {JSON.stringify(profile, null, 2)}
+          </pre>
+        )}
       </div>
       <div>
         <h2 className="font-bold text-2xl mb-4">Next steps</h2>
