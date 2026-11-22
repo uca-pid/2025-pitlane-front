@@ -2,13 +2,6 @@ import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
-import { FoodsProvider } from "@/lib/contexts/FoodsContext";
-import { MealsProvider } from "@/lib/contexts/MealsContext";
-import { UserProvider } from "@/lib/contexts/UserContext";
-import { NotificationProvider } from "@/lib/contexts/NotificationContext";
-import { CalorieProgressProvider } from "@/lib/contexts/CalorieProgressContext";
-import { Toaster } from "sonner";
-
 
 const defaultUrl = process.env.VERCEL_URL
   ? `https://${process.env.VERCEL_URL}`
@@ -16,8 +9,8 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "QueComemos",
-  description: "El sabor de la democracia en cada comida.",
+  title: "Next.js and Supabase Starter Kit",
+  description: "The fastest way to build apps with Next.js and Supabase",
 };
 
 const geistSans = Geist({
@@ -34,25 +27,14 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${geistSans.className} antialiased`}>
-        <UserProvider>
-          <FoodsProvider>
-            <MealsProvider>
-              <NotificationProvider>
-                <CalorieProgressProvider>
-                  <ThemeProvider
-                    attribute="class"
-                    defaultTheme="system"
-                    enableSystem
-                    disableTransitionOnChange
-                  >
-                    {children}
-                    <Toaster richColors position="top-right" />
-                  </ThemeProvider>
-                </CalorieProgressProvider>
-              </NotificationProvider>
-            </MealsProvider>
-          </FoodsProvider>
-        </UserProvider>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );

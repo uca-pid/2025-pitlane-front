@@ -1,7 +1,6 @@
 "use client";
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { API_BASE_URL } from '@/lib/config/api';
 
 // Interfaces
 interface UserProfile {
@@ -12,8 +11,8 @@ interface UserProfile {
 }
 
 interface UserPreferences {
-  preferences: number[];
-  dietaryRestrictions: number[];
+  preferences: any[];
+  dietaryRestrictions: any[];
   hasPreferences: boolean;
 }
 
@@ -28,6 +27,7 @@ interface UserContextType {
   error: string | null;
   updateProfile: (updates: Partial<UserProfile>) => void;
   updatePreferences: (preferences: UserPreferences) => void;
+  refetch: () => Promise<void>;
   setUsername: (username: string) => void;
 }
 
@@ -60,10 +60,9 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
   const supabase = createClient();
 
-  const fetchUserData = useCallback(async (forceRefresh = false) => {
+  const fetchUserData = async (forceRefresh = false) => {
     try {
       setLoading(true);
       setError(null);
@@ -71,14 +70,6 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
       const { data: claims, error: claimsError } = await supabase.auth.getClaims();
       
       if (claimsError || !claims?.claims) {
-        // Check if user is in the process of signing out by checking session
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          // User is signing out, don't show error
-          setUserData({ profile: null, preferences: null });
-          setLoading(false);
-          return;
-        }
         throw new Error('No authenticated user');
       }
 
@@ -114,7 +105,7 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
       }
 
       // Fetch profile data
-      const profileResponse = await fetch(`${API_BASE_URL}/profile/${userId}`, {
+      const profileResponse = await fetch(`http://localhost:3005/profile/${userId}`, {
         headers: {
           Authorization: `Bearer ${jwt}`,
           'Content-Type': 'application/json',
@@ -138,7 +129,7 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
       };
 
       // Fetch preferences data
-      const preferencesResponse = await fetch(`${API_BASE_URL}/profile/${userId}/full`, {
+      const preferencesResponse = await fetch(`http://localhost:3005/profile/${userId}/full`, {
         headers: {
           Authorization: `Bearer ${jwt}`,
           'Content-Type': 'application/json',
@@ -152,8 +143,8 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
       const preferencesData = await preferencesResponse.json();
       
       // Extract preferences and dietary restrictions
-      const preferences = preferencesData.Preference?.map((pref: { PreferenceID: number }) => pref.PreferenceID) || [];
-      const dietaryRestrictions = preferencesData.DietaryRestriction?.map((dr: { DietaryRestrictionID: number }) => dr.DietaryRestrictionID) || [];
+      const preferences = preferencesData.Preference?.map((pref: { PreferenceID: any }) => pref.PreferenceID) || [];
+      const dietaryRestrictions = preferencesData.DietaryRestriction?.map((dr: { DietaryRestrictionID: any }) => dr.DietaryRestrictionID) || [];
       
       // Check if user has any preferences or dietary restrictions set
       const hasPreferences = preferences.length > 0 || dietaryRestrictions.length > 0;
@@ -177,19 +168,12 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
       
       setUserData(completeUserData);
     } catch (err) {
-      // Double-check if user is signing out before setting error
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        // User is signing out, don't show error
-        setUserData({ profile: null, preferences: null });
-      } else {
-        setError(err instanceof Error ? err.message : 'Unknown error');
-        setUserData({ profile: null, preferences: null });
-      }
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      setUserData({ profile: null, preferences: null });
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  };
 
   // Función para actualizar el perfil localmente (sin refetch)
   const updateProfile = useCallback((updates: Partial<UserProfile>) => {
@@ -252,6 +236,19 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
     updateProfile({ username });
   }, [updateProfile]);
 
+  // Función para refetch completo
+  const refetch = async () => {
+    // Limpiar todo el cache para forzar fetch
+    userDataCache.clear();
+    
+    const { data: claims } = await supabase.auth.getClaims();
+    if (claims?.claims?.sub) {
+      // Asegurar que el cache específico del usuario esté limpio
+      userDataCache.delete(claims.claims.sub);
+    }
+    
+    await fetchUserData(true); // Forzar refresh
+  };
 
   useEffect(() => {
     const initializeUserData = async () => {
@@ -278,55 +275,44 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
           
           setUserData(updatedUserData);
           setLoading(false);
-          setIsInitialized(true);
           return; // No hacer fetch si el cache es válido
         }
       }
       
       // Solo hacer fetch si no hay cache válido
       await fetchUserData();
-      setIsInitialized(true);
     };
 
     initializeUserData();
 
     // Escuchar cambios de autenticación
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        // Solo responder a eventos de auth después de la inicialización
-        if (!isInitialized) return;
-
-        if (event === 'SIGNED_IN') {
-          // Solo refrescar si realmente hay un cambio de usuario o es un nuevo login
-          const currentUserId = userData.profile?.id;
-          const newUserId = session?.user?.id;
-          
-          // Si no hay usuario actual o el usuario cambió, hacer refresh
-          if (!currentUserId || currentUserId !== newUserId) {
-            fetchUserData(true); // Forzar refresh para nuevo usuario
-          }
-        } else if (event === 'TOKEN_REFRESHED') {
-          // Solo actualizar si hay cambios significativos en la sesión
-          // En la mayoría de casos, el token refresh no requiere refetch completo
-          const currentUserId = userData.profile?.id;
-          const sessionUserId = session?.user?.id;
-          
-          if (currentUserId !== sessionUserId) {
-            fetchUserData(false);
-          }
+      (event) => {
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          fetchUserData(true); // Forzar refresh en cambios de auth
         } else if (event === 'SIGNED_OUT') {
-          setError(null); // Clear error immediately on logout
           setUserData({ profile: null, preferences: null });
-          setLoading(true);
-          setIsInitialized(false);
+          setLoading(false);
           userDataCache.clear();
         }
       }
     );
 
     return () => subscription.unsubscribe();
-  }, [supabase, isInitialized, userData.profile?.id, fetchUserData]);
+  }, [supabase]);
 
+  // Escuchar eventos personalizados para actualizaciones (mantenemos por compatibilidad)
+  useEffect(() => {
+    const handleProfileUpdate = async () => {
+      await refetch();
+    };
+
+    window.addEventListener('userProfileUpdated', handleProfileUpdate);
+
+    return () => {
+      window.removeEventListener('userProfileUpdated', handleProfileUpdate);
+    };
+  }, []);
 
   const value: UserContextType = {
     userData,
@@ -334,6 +320,7 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
     error,
     updateProfile,
     updatePreferences,
+    refetch,
     setUsername,
   };
 
